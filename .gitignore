@@ -38,3 +38,6 @@ Thumbs.db
 *.json
 !package.json
 credentials/
+key.json
+*-key.json
+service-account*.json

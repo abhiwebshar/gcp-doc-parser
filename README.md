@@ -122,6 +122,61 @@ python layout_parser.py --file your_document.xlsx
 3. Python 3.10+
 4. A test document (PDF, Excel, Word, or PowerPoint)
 
+### Authentication Setup (ADC)
+
+The scripts use [Application Default Credentials (ADC)](https://cloud.google.com/docs/authentication/application-default-credentials). Set up once:
+
+```bash
+# Login with your Google account
+gcloud auth login
+
+# Set up ADC for local development
+gcloud auth application-default login
+
+# Set your default project
+gcloud config set project YOUR_PROJECT
+
+# Verify
+gcloud auth list
+gcloud config get-value project
+```
+
+**Environment variables** (optional, scripts auto-detect from gcloud):
+
+```bash
+# Only needed if not using gcloud config
+export GOOGLE_CLOUD_PROJECT="your-project-id"
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account-key.json"  # If using service account
+```
+
+**For production/CI**, use a service account:
+
+```bash
+# Create service account
+gcloud iam service-accounts create doc-parser \
+  --display-name="Document Parser Service Account"
+
+# Grant roles
+gcloud projects add-iam-policy-binding YOUR_PROJECT \
+  --member="serviceAccount:doc-parser@YOUR_PROJECT.iam.gserviceaccount.com" \
+  --role="roles/aiplatform.user"
+
+gcloud projects add-iam-policy-binding YOUR_PROJECT \
+  --member="serviceAccount:doc-parser@YOUR_PROJECT.iam.gserviceaccount.com" \
+  --role="roles/documentai.editor"
+
+gcloud projects add-iam-policy-binding YOUR_PROJECT \
+  --member="serviceAccount:doc-parser@YOUR_PROJECT.iam.gserviceaccount.com" \
+  --role="roles/storage.objectAdmin"
+
+# Download key (for CI/CD)
+gcloud iam service-accounts keys create key.json \
+  --iam-account=doc-parser@YOUR_PROJECT.iam.gserviceaccount.com
+
+# Use in CI
+export GOOGLE_APPLICATION_CREDENTIALS="./key.json"
+```
+
 ### Option 1: RAG Engine LLM Parser (PDF → Markdown)
 
 ```bash
