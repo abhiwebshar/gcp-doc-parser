@@ -1,3 +1,5 @@
 google-cloud-aiplatform>=1.60.0
 google-cloud-storage>=2.14.0
 google-cloud-documentai>=2.20.0
+pypdf>=4.0.0
+requests>=2.31.0

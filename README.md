@@ -1,408 +1,189 @@
-# Vertex AI RAG Engine LLM Parser - Document to Markdown Conversion
+# GCP Document Parser
 
-## Goal
+Convert documents (PDF, Excel, Word, PowerPoint) to Markdown using Google Cloud's managed services.
 
-Convert PDF documents to high-fidelity Markdown files using GCP's native Vertex AI services - similar to LlamaParse but within GCP ecosystem.
+## The Problem
 
-## Overview
+You have documents. You need structured text (Markdown) for RAG pipelines, search indexing, or LLM context. Sounds simple, but it's not.
 
-This project uses **Vertex AI RAG Engine with LLM Parser** to:
-1. Parse PDFs using Gemini models (intelligent understanding of tables, structure, formatting)
-2. Retrieve the parsed content
-3. Output as Markdown files to GCS
+## Evolution of Document Parsing
 
-### Key Insight
+### Era 1: Traditional OCR & Rule-Based Parsers
+- **Tools:** Tesseract, Apache Tika, PyPDF
+- **How it works:** OCR + heuristics to extract text
+- **Problem:** No semantic understanding. Tables become jumbled text. Headers lose hierarchy. Complex layouts break completely.
 
-The RAG Engine's LLM Parser uses Gemini to parse documents **before** chunking. We leverage this parsing capability, retrieve all chunks, and combine them back into full Markdown documents.
+### Era 2: Document AI (ML-Based)
+- **Tools:** Google Document AI, Azure Document Intelligence, AWS Textract
+- **How it works:** ML models trained on document layouts
+- **Better:** Understands tables, forms, structure
+- **Problem:** Pre-trained on specific document types. Custom documents need fine-tuning. Still struggles with nuanced formatting.
 
-## Why This Approach
+### Era 3: LLM-Powered Parsing
+- **Tools:** LlamaParse, Reducto, direct Gemini/GPT-4V
+- **How it works:** Send document image/PDF to LLM, ask it to output Markdown
+- **Best quality:** LLMs understand context, can follow complex layouts, handle edge cases
+- **Problem:** DIY is painful (see below)
 
-| Approach | Pros | Cons |
-|----------|------|------|
-| **LlamaParse** | High fidelity, many formats | External service, separate billing |
-| **Gemini Direct** | Full control, full documents | Must handle retries, rate limits yourself |
-| **Vertex AI RAG Engine LLM Parser** | Managed service, handles retries/rate limits, same GCP billing | Outputs chunks (combined back to full doc) |
-| **Vertex AI Batch Prediction** | Full documents, managed | More setup, async only |
+## Pain Points of DIY LLM Parsing
 
-We chose **Vertex AI RAG Engine** because:
-- All infrastructure already on GCP
-- Same billing account (uses existing GCP credits)
-- Managed service handles rate limits and retries
-- Uses Gemini models under the hood
-- Can retrieve and combine chunks to reconstruct full documents
+If you just call Gemini/GPT-4 directly for document parsing:
 
-### Limitation: Chunking
+| Pain Point | Description |
+|------------|-------------|
+| **Format conversion** | Must convert DOCX/XLSX/PPTX → PDF → images. Each step loses fidelity. |
+| **Rate limits** | LLM APIs have strict rate limits. Parsing 1000 docs? Good luck. |
+| **Shared quota** | Document parsing eats the same rate limits as your production LLM calls. |
+| **Retries** | API failures happen. You need exponential backoff, dead letter queues. |
+| **Cost tracking** | Hard to separate parsing costs from other LLM usage. |
+| **Chunking large docs** | 100-page PDF won't fit in context. Need to split, process, reassemble. |
 
-RAG Engine chunks the parsed content. We work around this by:
-1. Using large chunk sizes (4096 tokens) to minimize fragmentation
-2. Retrieving all chunks via `retrieval_query`
-3. **Deduplicating** overlapping content (line-based dedup)
-4. Combining chunks into a single clean Markdown file
+## The Managed Service Philosophy
 
-The script automatically:
-- Removes duplicate lines caused by chunk overlap
-- Strips markdown code fences (`\`\`\`markdown`) that the LLM parser sometimes adds
-- Produces a clean, deduplicated markdown file
+Think **CloudSQL vs self-hosted Postgres**:
 
-## Quick Start (TL;DR)
+| DIY (Self-hosted) | Managed Service |
+|-------------------|-----------------|
+| Full control | Less control |
+| Handle backups yourself | Automatic backups |
+| Manage scaling | Auto-scaling |
+| Debug failures at 3am | SLA-backed reliability |
+| Your engineers' time | Their engineers' time |
+
+**For document parsing, you want a managed service** that handles:
+- Rate limiting & retries
+- Format conversion
+- Scaling
+- Separate billing from your main LLM usage
+
+## Solutions in This Repo
+
+### Option 1: RAG Engine LLM Parser (Hacky but Works)
+
+**The insight:** Vertex AI RAG Engine has an LLM Parser that uses Gemini to parse documents *before* chunking. We can:
+1. Upload docs → RAG Engine parses them with Gemini
+2. Retrieve the parsed chunks
+3. Combine chunks back into full Markdown
+
+**Pros:**
+- Managed Gemini parsing (retries, rate limits handled)
+- Uses GCP credits
+- Custom prompts supported
+
+**Cons:**
+- Designed for RAG, not document export
+- Must work around chunking (retrieve all, deduplicate, combine)
+- Only supports PDF + images
+
+**Use:** `test_llm_parser.py`
+
+### Option 2: Document AI Layout Parser (Proper Solution)
+
+**The insight:** Document AI's Layout Parser now uses Gemini (v1.4+) under the hood. It's the "proper" managed service for document parsing.
+
+**Pros:**
+- Supports Excel, Word, PowerPoint, HTML, PDF
+- Truly managed (not a hack)
+- Batch processing for large volumes
+- Auto-splits large PDFs
+
+**Cons:**
+- No custom prompts (fixed parsing behavior)
+- Requires processor setup
+
+**Use:** `layout_parser.py`
+
+## Quick Start
 
 ```bash
-# 1. Clone and setup
-cd gcp_llm_parser
+# Clone
+git clone https://github.com/YOUR_USERNAME/gcp-doc-parser.git
+cd gcp-doc-parser
+
+# Setup
 uv venv && source .venv/bin/activate
-uv pip install google-cloud-aiplatform google-cloud-storage
+uv pip install -r requirements.txt
 
-# 2. Grant RAG service account access (one-time)
-gcloud storage buckets add-iam-policy-binding gs://YOUR_BUCKET \
-  --member="serviceAccount:service-PROJECT_NUMBER@gcp-sa-vertex-rag.iam.gserviceaccount.com" \
-  --role="roles/storage.objectAdmin"
+# Configure (edit PROJECT_ID, BUCKET in scripts)
 
-# 3. Upload PDF and run
-gsutil cp document.pdf gs://YOUR_BUCKET/test_docs/
-python test_llm_parser.py
+# Option 1: RAG Engine (PDF only, custom prompts)
+python test_llm_parser.py --file document.pdf
 
-# Output: parsed_output.md (local) + gs://YOUR_BUCKET/parsed_output/document.md
+# Option 2: Document AI (Excel/Word/PPT support)
+python layout_parser.py --file spreadsheet.xlsx
 ```
 
-## Prerequisites
+## Comparison
 
-- GCP Project with Vertex AI API enabled
-- GCS bucket for input/output
-- Python 3.10+
-- `gcloud` CLI configured
-
-## Setup
-
-### 1. Grant RAG Service Account Access to GCS
-
-The Vertex AI RAG service account needs read/write access to your GCS bucket:
-
-```bash
-# Find your project number
-gcloud projects describe YOUR_PROJECT_ID --format="value(projectNumber)"
-
-# Grant access (replace PROJECT_NUMBER and BUCKET_NAME)
-gcloud storage buckets add-iam-policy-binding gs://YOUR_BUCKET \
-  --member="serviceAccount:service-PROJECT_NUMBER@gcp-sa-vertex-rag.iam.gserviceaccount.com" \
-  --role="roles/storage.objectAdmin"
-```
-
-For our project:
-```bash
-gcloud storage buckets add-iam-policy-binding gs://trenta_llmops \
-  --member="serviceAccount:service-798248085248@gcp-sa-vertex-rag.iam.gserviceaccount.com" \
-  --role="roles/storage.objectAdmin"
-```
-
-### 2. Install Dependencies
-
-```bash
-# Using uv (recommended)
-uv venv
-source .venv/bin/activate
-uv pip install google-cloud-aiplatform google-cloud-storage
-
-# Or using pip
-pip install google-cloud-aiplatform google-cloud-storage
-```
-
-### 3. Configure the Script
-
-Edit `test_llm_parser.py` and set:
-
-```python
-PROJECT_ID = "compliancebotqa"      # Your GCP project
-LOCATION = "us-central1"             # Region
-BUCKET = "trenta_llmops"             # Your GCS bucket
-INPUT_GCS_URI = f"gs://{BUCKET}/test_docs/your_file.pdf"
-```
-
-## Usage
-
-### Upload a Document
-
-```bash
-gsutil cp your_document.pdf gs://trenta_llmops/test_docs/
-```
-
-### Run Full Pipeline
-
-```bash
-python test_llm_parser.py
-```
-
-This will:
-1. Create a new RAG corpus
-2. Import the document with LLM parsing
-3. Display parsed chunks in terminal
-4. Save combined markdown locally (`parsed_output.md`)
-5. Save to GCS (`gs://trenta_llmops/parsed_output/`)
-
-### List Existing Corpora
-
-```bash
-python test_llm_parser.py --list-corpora
-```
-
-### Inspect Existing Corpus
-
-```bash
-python test_llm_parser.py --inspect-only --corpus 'projects/798248085248/locations/us-central1/ragCorpora/CORPUS_ID'
-```
-
-### Custom Query for Retrieval
-
-```bash
-python test_llm_parser.py --inspect-only --corpus 'CORPUS_NAME' --query 'security requirements'
-```
-
-## Configuration Options
-
-### LLM Parser Settings
-
-In `test_llm_parser.py`:
-
-```python
-MODEL_ID = "gemini-2.0-flash"  # Or gemini-2.5-pro, gemini-2.5-flash
-
-CUSTOM_PROMPT = """Convert this document to well-structured markdown.
-Preserve all:
-- Headings and hierarchy
-- Tables (use markdown table format)
-- Lists and bullet points
-- Code blocks
-- Important formatting
-
-Output clean, readable markdown only."""
-```
-
-### Chunking Settings
-
-```python
-transformation_config = rag.TransformationConfig(
-    chunking_config=rag.ChunkingConfig(
-        chunk_size=4096,   # Max practical size (embedding limit ~2048, but we don't need embeddings)
-        chunk_overlap=100, # Minimal overlap since we combine chunks anyway
-    ),
-)
-```
-
-**Note:** For document-to-markdown conversion (not RAG retrieval), use the **largest chunk size** to minimize fragmentation. The embedding model limit is 2048 tokens, but since we're just extracting text, larger may work.
-
-### Retrieval Settings
-
-```python
-rag_retrieval_config = rag.RagRetrievalConfig(
-    top_k=50,  # Number of chunks to retrieve
-    filter=rag.Filter(vector_distance_threshold=10.0),  # Higher = more inclusive
-)
-```
-
-## Supported File Types
-
-- `application/pdf`
-- `image/png`
-- `image/jpeg`
-- `image/webp`
-- `image/heic`
-- `image/heif`
-
-**Note:** For DOCX/PPTX, convert to PDF first.
-
-## Supported Models
-
-- Gemini 2.0 Flash
-- Gemini 2.5 Flash / Flash-Lite
-- Gemini 2.5 Pro
-- Gemini 3 Flash / Pro (preview)
-
-## Test Results
-
-### Test Document
-- **File:** `ACME_Corp_PCI_ROC_EXTRACTED.pdf` (5.9 MB PCI DSS compliance report)
-- **Result:** 31 chunks successfully parsed
-
-### What LLM Parser Captured
-- ✅ Complex multi-column tables with proper markdown formatting
-- ✅ Heading hierarchy preserved
-- ✅ Checkbox symbols (☐, ☑, ☒)
-- ✅ Bullet points and nested lists
-- ✅ Page references
-- ✅ Document structure and sections
-
-### Sample Output
-
-```markdown
-# PCI Security Standards Council
-
-## Summary of Assessment Findings (check one)
-
-| PCI DSS Requirements and Testing Procedures | Reporting Instruction | Reporting Details | In Place | N/A |
-|---------------------------------------------|----------------------|-------------------|----------|-----|
-| 1.2.2 Secure and synchronize router config  | Describe how...      | N/A - Since...    | ☐        | ☑   |
-```
-
-## Cost Estimation
-
-Formula:
-```
-cost = num_files * pages_per_file * (input_tokens * input_price + output_tokens * output_price)
-```
-
-Example (Gemini 2.0 Flash-Lite @ $0.075/1M input, $0.30/1M output):
-```
-1,000 PDFs × 50 pages × (600 input + 100 output tokens) ≈ $3.75
-```
+| Feature | LLM Parser (RAG Engine) | Layout Parser (Document AI) |
+|---------|-------------------------|----------------------------|
+| PDF | ✅ | ✅ |
+| Excel | ❌ | ✅ |
+| Word | ❌ | ✅ |
+| PowerPoint | ❌ | ✅ |
+| Images | ✅ | ✅ |
+| Custom prompts | ✅ | ❌ |
+| Truly managed | ⚠️ Hacky | ✅ |
+| Large PDFs | Via chunking | Auto-split or batch |
 
 ## Architecture
 
-### Pipeline (Behind the Scenes)
+### Option 1: RAG Engine (Hacky)
 
 ```
-PDF Document
-    │
-    ▼
-┌─────────────────────────────────────┐
-│  1. LLM PARSER (Gemini)             │  ← Parsing happens FIRST
-│     - Reads PDF visually            │
-│     - Understands tables, structure │
-│     - Outputs clean Markdown        │
-└─────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────┐
-│  2. CHUNKING (Transformation)       │  ← Applied to parsed Markdown
-│     - Splits MD into chunks         │
-│     - We use large chunks (4096)    │
-└─────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────┐
-│  3. EMBEDDING                       │  ← We don't care about this
-│     - Creates vectors for retrieval │
-└─────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────┐
-│  4. RAG CORPUS                      │  ← Stored here
-│     - Chunks with embeddings        │
-└─────────────────────────────────────┘
+PDF → RAG Engine → [Gemini LLM Parser] → Chunks → retrieve_query() → Combine → Markdown
+                         ↑
+                   (parsing happens here,
+                    before chunking)
 ```
 
-**Key insight:** The LLM Parser runs **before** chunking. So chunks already contain nicely parsed Markdown. We just need to retrieve them and combine.
-
-### Our Workflow
+### Option 2: Document AI (Proper)
 
 ```
-┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
-│  GCS Bucket     │────▶│  Vertex AI RAG       │────▶│  GCS Bucket     │
-│  (input PDFs)   │     │  Engine + LLM Parser │     │  (output .md)   │
-└─────────────────┘     │  (Gemini 2.0 Flash)  │     └─────────────────┘
-                        └──────────────────────┘
-                                  │
-                        retrieval_query()
-                                  │
-                                  ▼
-                        ┌──────────────────────┐
-                        │  Combine + Dedup     │
-                        │  → Clean Markdown    │
-                        └──────────────────────┘
+Any Format → Document AI Layout Parser → Structured JSON → Convert → Markdown
+                      ↑
+                (Gemini-powered v1.4+)
 ```
 
-## Files
+## Cost
+
+Both use GCP credits. Rough estimate for Gemini 2.0 Flash-Lite:
 
 ```
-gcp_llm_parser/
-├── README.md                 # This file
-├── requirements.txt          # Python dependencies
-├── test_llm_parser.py        # Main script
-├── parsed_output.md          # Local output (generated)
-└── notes.md                  # Research notes
+1,000 PDFs × 50 pages × 700 tokens ≈ $3.75
 ```
 
-## Troubleshooting
+## Future Work / TODOs
 
-### "Permission Denied" on import
+- [ ] **Temporal/Airflow orchestration** - Build a proper parsing service with:
+  - Job queuing
+  - Retry policies
+  - Progress tracking
+  - Webhook notifications
 
-Grant the RAG service account access to your bucket:
-```bash
-gcloud storage buckets add-iam-policy-binding gs://YOUR_BUCKET \
-  --member="serviceAccount:service-PROJECT_NUMBER@gcp-sa-vertex-rag.iam.gserviceaccount.com" \
-  --role="roles/storage.objectAdmin"
-```
+  *Trade-off: Significant engineering effort + ongoing maintenance vs. using external managed service like LlamaParse*
 
-### 0 files imported
+- [ ] **Batch processing** - Process folders of documents in parallel
+- [ ] **Format detection** - Auto-detect and route to appropriate parser
+- [ ] **Quality scoring** - Compare parsed output against source
 
-- Check the service account has read access to source files
-- Verify the file exists at the GCS URI
-- Check file format is supported (PDF, PNG, JPEG, etc.)
+## When to Use What
 
-### Empty chunks retrieved
-
-- Increase `top_k` in retrieval config
-- Increase `vector_distance_threshold`
-- Wait longer for processing (large files take time)
+| Scenario | Recommendation |
+|----------|----------------|
+| PDF with complex tables, need custom output | LLM Parser (Option 1) |
+| Excel/Word/PowerPoint files | Layout Parser (Option 2) |
+| High volume, need reliability | Layout Parser + Batch mode |
+| Prototype/exploration | Either works |
+| Production service | Consider LlamaParse/Reducto OR build with Temporal |
 
 ## References
 
-- [Vertex AI RAG Engine LLM Parser Docs](https://cloud.google.com/vertex-ai/generative-ai/docs/rag-engine/llm-parser)
-- [RAG Engine API Reference](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/model-reference/rag-api)
-- [RAG Engine Overview](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/rag-engine/rag-overview)
-- [Vertex AI Pricing](https://cloud.google.com/vertex-ai/pricing)
+- [Vertex AI RAG Engine LLM Parser](https://cloud.google.com/vertex-ai/generative-ai/docs/rag-engine/llm-parser)
+- [Document AI Layout Parser](https://cloud.google.com/document-ai/docs/layout-parse-chunk)
+- [LlamaParse](https://docs.llamaindex.ai/en/stable/llama_cloud/llama_parse/)
+- [Reducto](https://reducto.ai/)
 
-## Option 2: Document AI Layout Parser (Excel Support)
+## License
 
-For Excel/Word/PowerPoint support, use **Document AI Layout Parser** instead of LLM Parser.
-
-### Supported Formats
-
-| Format | Supported | Size Limit |
-|--------|-----------|------------|
-| PDF | ✅ | 1 GB / 500 pages |
-| DOCX (Word) | ✅ | 20 MB |
-| PPTX (PowerPoint) | ✅ | 20 MB |
-| **XLSX (Excel)** | ✅ | 5 million cells |
-| XLSM (Excel+macros) | ✅ | 5 million cells |
-| HTML | ✅ | 20 MB |
-
-### Setup
-
-```bash
-# 1. Enable Document AI API
-gcloud services enable documentai.googleapis.com --project=compliancebotqa
-
-# 2. Grant Document AI admin role
-gcloud projects add-iam-policy-binding compliancebotqa \
-  --member="user:$(gcloud config get-value account)" \
-  --role="roles/documentai.admin" \
-  --condition=None
-
-# 3. Create a Layout Parser processor
-python layout_parser.py --setup
-
-# 4. Process files
-python layout_parser.py --file spreadsheet.xlsx --processor-id YOUR_PROCESSOR_ID
-```
-
-### Comparison: LLM Parser vs Layout Parser
-
-| Feature | LLM Parser | Document AI Layout Parser |
-|---------|------------|---------------------------|
-| Excel support | ❌ | ✅ |
-| Word support | ❌ | ✅ |
-| PowerPoint | ❌ | ✅ |
-| PDF | ✅ | ✅ |
-| Images | ✅ | ✅ |
-| Custom prompt | ✅ | ❌ |
-| Gemini-powered | ✅ | ✅ (v1.4+) |
-
-**Recommendation:**
-- Use **LLM Parser** for PDFs with custom parsing needs
-- Use **Layout Parser** for Excel/Word/PowerPoint files
-
-## Next Steps
-
-- [ ] Batch processing for multiple files
-- [ ] Webhook notification when processing complete
-- [ ] Custom parsing prompts per document type
-- [ ] Integration with downstream RAG pipeline
+MIT - Use freely, no warranty.

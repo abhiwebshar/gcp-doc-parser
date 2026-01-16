@@ -18,7 +18,7 @@ ENV/
 parsed_output.md
 *.md
 !README.md
-!notes.md
+notes.md
 
 # Test files
 *.pdf

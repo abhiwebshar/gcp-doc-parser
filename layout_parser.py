@@ -23,12 +23,12 @@ import tempfile
 from pypdf import PdfReader, PdfWriter
 
 # ============ CONFIGURE THESE ============
-PROJECT_ID = "compliancebotqa"
+PROJECT_ID = "your-gcp-project"  # TODO: Your GCP project ID
 LOCATION = "us"  # Document AI multi-region: 'us' or 'eu'
-BUCKET = "trenta_llmops"
+BUCKET = "your-bucket"  # TODO: Your GCS bucket
 
-# Layout Parser processor ID (created via REST API)
-PROCESSOR_ID = "7dfc4ba025057d4c"
+# Layout Parser processor ID (created via --setup or REST API)
+PROCESSOR_ID = None  # TODO: Set after running --setup
 
 INPUT_GCS_URI = f"gs://{BUCKET}/test_docs/"  # Folder with documents
 OUTPUT_PREFIX = "parsed_output/"

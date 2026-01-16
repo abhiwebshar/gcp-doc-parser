@@ -14,11 +14,11 @@ import time
 import argparse
 
 # ============ CONFIGURE THESE ============
-PROJECT_ID = "compliancebotqa"
+PROJECT_ID = "your-gcp-project"  # TODO: Your GCP project ID
 LOCATION = "us-central1"
-BUCKET = "trenta_llmops"
+BUCKET = "your-bucket"  # TODO: Your GCS bucket
 
-INPUT_GCS_URI = f"gs://{BUCKET}/test_docs/ACME_Corp_PCI_ROC_EXTRACTED.pdf"
+INPUT_GCS_URI = f"gs://{BUCKET}/test_docs/document.pdf"  # TODO: Your input file
 OUTPUT_PREFIX = "parsed_output/"
 
 # LLM Parser config
