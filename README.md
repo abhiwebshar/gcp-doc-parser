@@ -97,7 +97,7 @@ Think **CloudSQL vs self-hosted Postgres**:
 
 ```bash
 # Clone
-git clone https://github.com/YOUR_USERNAME/gcp-doc-parser.git
+git clone https://github.com/abhiwebshar/gcp-doc-parser.git
 cd gcp-doc-parser
 
 # Setup
@@ -107,10 +107,106 @@ uv pip install -r requirements.txt
 # Configure (edit PROJECT_ID, BUCKET in scripts)
 
 # Option 1: RAG Engine (PDF only, custom prompts)
-python test_llm_parser.py --file document.pdf
+python test_llm_parser.py
 
 # Option 2: Document AI (Excel/Word/PPT support)
-python layout_parser.py --file spreadsheet.xlsx
+python layout_parser.py --file your_document.xlsx
+```
+
+## How to Reproduce (Step-by-Step)
+
+### Prerequisites
+
+1. GCP Project with billing enabled
+2. `gcloud` CLI installed and authenticated
+3. Python 3.10+
+4. A test document (PDF, Excel, Word, or PowerPoint)
+
+### Option 1: RAG Engine LLM Parser (PDF → Markdown)
+
+```bash
+# 1. Enable Vertex AI API
+gcloud services enable aiplatform.googleapis.com --project=YOUR_PROJECT
+
+# 2. Create a GCS bucket (or use existing)
+gsutil mb -p YOUR_PROJECT gs://YOUR_BUCKET
+
+# 3. Grant RAG service account access
+PROJECT_NUMBER=$(gcloud projects describe YOUR_PROJECT --format="value(projectNumber)")
+gcloud storage buckets add-iam-policy-binding gs://YOUR_BUCKET \
+  --member="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-vertex-rag.iam.gserviceaccount.com" \
+  --role="roles/storage.objectAdmin"
+
+# 4. Upload your test PDF
+gsutil cp your_document.pdf gs://YOUR_BUCKET/test_docs/
+
+# 5. Configure the script
+# Edit test_llm_parser.py:
+#   PROJECT_ID = "YOUR_PROJECT"
+#   BUCKET = "YOUR_BUCKET"
+#   INPUT_GCS_URI = "gs://YOUR_BUCKET/test_docs/your_document.pdf"
+
+# 6. Run
+python test_llm_parser.py
+
+# Output: parsed_output.md (local) + gs://YOUR_BUCKET/parsed_output/your_document.md
+```
+
+### Option 2: Document AI Layout Parser (Excel/Word/PPT → Markdown)
+
+```bash
+# 1. Enable Document AI API
+gcloud services enable documentai.googleapis.com --project=YOUR_PROJECT
+
+# 2. Grant yourself Document AI admin role
+gcloud projects add-iam-policy-binding YOUR_PROJECT \
+  --member="user:$(gcloud config get-value account)" \
+  --role="roles/documentai.admin" \
+  --condition=None
+
+# 3. Create a Layout Parser processor (via REST API)
+curl -X POST \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" \
+  "https://us-documentai.googleapis.com/v1/projects/YOUR_PROJECT/locations/us/processors" \
+  -d '{
+    "displayName": "layout-parser",
+    "type": "LAYOUT_PARSER_PROCESSOR"
+  }'
+# Note the processor ID from the response (e.g., "abc123def456")
+
+# 4. Configure the script
+# Edit layout_parser.py:
+#   PROJECT_ID = "YOUR_PROJECT"
+#   PROCESSOR_ID = "abc123def456"  # From step 3
+
+# 5. Run with your document
+python layout_parser.py --file your_spreadsheet.xlsx
+# Or for PDF:
+python layout_parser.py --file your_document.pdf
+
+# Output: your_spreadsheet.md (local)
+```
+
+### Testing with Sample Documents
+
+Use any document you have. Good test cases:
+- **PDF with tables** - Tests table extraction
+- **Multi-page PDF** - Tests chunking/splitting (>30 pages triggers auto-split)
+- **Excel spreadsheet** - Tests XLSX support (Layout Parser only)
+- **Word document** - Tests DOCX support (Layout Parser only)
+
+### Verify Output
+
+```bash
+# Check the generated markdown
+cat parsed_output.md | head -100
+
+# Look for:
+# - Proper headings (#, ##, ###)
+# - Tables in markdown format (| col1 | col2 |)
+# - Lists preserved (-, *, 1.)
+# - No garbled text or broken structure
 ```
 
 ## Comparison
