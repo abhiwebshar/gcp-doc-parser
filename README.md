@@ -100,17 +100,16 @@ Think **CloudSQL vs self-hosted Postgres**:
 git clone https://github.com/abhiwebshar/gcp-doc-parser.git
 cd gcp-doc-parser
 
-# Setup
+# Setup (choose one)
+# Option A: Using uv (faster)
 uv venv && source .venv/bin/activate
 uv pip install -r requirements.txt
 
-# Configure (edit PROJECT_ID, BUCKET in scripts)
+# Option B: Using pip
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 
-# Option 1: RAG Engine (PDF only, custom prompts)
-python test_llm_parser.py
-
-# Option 2: Document AI (Excel/Word/PPT support)
-python layout_parser.py --file your_document.xlsx
+# Then follow "How to Reproduce" section below
 ```
 
 ## How to Reproduce (Step-by-Step)
@@ -220,6 +219,7 @@ gcloud projects add-iam-policy-binding YOUR_PROJECT \
   --condition=None
 
 # 3. Create a Layout Parser processor (via REST API)
+# NOTE: IAM permissions can take 2-5 minutes to propagate. If you get permission errors, wait and retry.
 curl -X POST \
   -H "Authorization: Bearer $(gcloud auth print-access-token)" \
   -H "Content-Type: application/json" \
@@ -228,7 +228,14 @@ curl -X POST \
     "displayName": "layout-parser",
     "type": "LAYOUT_PARSER_PROCESSOR"
   }'
-# Note the processor ID from the response (e.g., "abc123def456")
+
+# Response looks like:
+# {
+#   "name": "projects/123456789/locations/us/processors/abc123def456",
+#   "type": "LAYOUT_PARSER_PROCESSOR",
+#   ...
+# }
+# The processor ID is the last part: "abc123def456"
 
 # 4. Configure the script
 # Edit layout_parser.py:
@@ -327,6 +334,61 @@ Both use GCP credits. Rough estimate for Gemini 2.0 Flash-Lite:
 | High volume, need reliability | Layout Parser + Batch mode |
 | Prototype/exploration | Either works |
 | Production service | Consider LlamaParse/Reducto OR build with Temporal |
+
+## Troubleshooting
+
+### "Permission denied" errors
+
+**IAM propagation delay:** After granting roles, wait 2-5 minutes for permissions to propagate. Then retry.
+
+**Wrong project:** Verify you're using the correct project:
+```bash
+gcloud config get-value project
+```
+
+**ADC not set up:** Run:
+```bash
+gcloud auth application-default login
+```
+
+### "API not enabled" errors
+
+Enable the required APIs:
+```bash
+# For RAG Engine
+gcloud services enable aiplatform.googleapis.com --project=YOUR_PROJECT
+
+# For Document AI
+gcloud services enable documentai.googleapis.com --project=YOUR_PROJECT
+```
+
+### "0 files imported" (RAG Engine)
+
+The RAG service account needs access to your GCS bucket:
+```bash
+PROJECT_NUMBER=$(gcloud projects describe YOUR_PROJECT --format="value(projectNumber)")
+gcloud storage buckets add-iam-policy-binding gs://YOUR_BUCKET \
+  --member="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-vertex-rag.iam.gserviceaccount.com" \
+  --role="roles/storage.objectAdmin"
+```
+
+### "Document pages exceed limit" (Document AI)
+
+Online processing limit is 30 pages. The script auto-splits PDFs >30 pages, but if you see this error:
+- Ensure you're using `layout_parser.py` (has auto-split)
+- For very large docs, use batch processing
+
+### "Unsupported MIME type"
+
+Check file format support:
+- **LLM Parser:** PDF, PNG, JPEG, WebP, HEIC, HEIF only
+- **Layout Parser:** PDF, DOCX, XLSX, PPTX, HTML
+
+### Still stuck?
+
+1. Check [Vertex AI docs](https://cloud.google.com/vertex-ai/generative-ai/docs/rag-engine/llm-parser)
+2. Check [Document AI docs](https://cloud.google.com/document-ai/docs/layout-parse-chunk)
+3. Open an issue on this repo
 
 ## References
 
