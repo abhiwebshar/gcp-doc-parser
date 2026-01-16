@@ -18,6 +18,7 @@ ENV/
 parsed_output.md
 *.md
 !README.md
+!CLAUDE.md
 notes.md
 
 # Test files
